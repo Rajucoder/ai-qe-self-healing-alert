@@ -1,0 +1,89 @@
+[
+  {
+    "id": "healthy_environment_no_action",
+    "description": "Service and dependencies are healthy, so no remediation should occur.",
+    "request": {
+      "alert": "Order service is unavailable",
+      "environment": "test"
+    },
+    "environment": {
+      "database_healthy": true,
+      "service_healthy": true,
+      "logs_normal": true,
+      "restart_succeeds": true,
+      "validation_healthy": true
+    },
+    "expected": {
+      "status": "no_action",
+      "remediation_performed": false,
+      "incident_created": false,
+      "trajectory": [
+        "check_database",
+        "check_service",
+        "check_logs"
+      ],
+      "forbidden_tools": [
+        "restart_service",
+        "create_incident"
+      ]
+    }
+  },
+  {
+    "id": "unhealthy_service_remediated",
+    "description": "Service is unhealthy, remediation succeeds, and validation confirms recovery.",
+    "request": {
+      "alert": "Order service is unavailable",
+      "environment": "test"
+    },
+    "environment": {
+      "database_healthy": true,
+      "service_healthy": false,
+      "logs_normal": false,
+      "restart_succeeds": true,
+      "validation_healthy": true
+    },
+    "expected": {
+      "status": "resolved",
+      "remediation_performed": true,
+      "incident_created": false,
+      "trajectory": [
+        "check_database",
+        "check_service",
+        "check_logs",
+        "restart_service",
+        "validate_service"
+      ],
+      "forbidden_tools": [
+        "create_incident"
+      ]
+    }
+  },
+  {
+    "id": "remediation_failure_escalation",
+    "description": "Service remains unhealthy after remediation, so the agent should escalate.",
+    "request": {
+      "alert": "Order service is unavailable",
+      "environment": "test"
+    },
+    "environment": {
+      "database_healthy": true,
+      "service_healthy": false,
+      "logs_normal": false,
+      "restart_succeeds": false,
+      "validation_healthy": false
+    },
+    "expected": {
+      "status": "escalated",
+      "remediation_performed": true,
+      "incident_created": true,
+      "trajectory": [
+        "check_database",
+        "check_service",
+        "check_logs",
+        "restart_service",
+        "validate_service",
+        "create_incident"
+      ]
+    }
+  }
+]
