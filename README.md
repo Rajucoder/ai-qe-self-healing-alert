@@ -1,64 +1,187 @@
-# ai-qe-self-healing-agent
+# AI-QE Self-Healing Agent
 
-A deterministic, observable FastAPI application that investigates operational alerts and performs only safe simulated remediation. It is the application under test; no QA framework or test suite is included.
+A simulated self-healing incident-response agent built as a FastAPI service. It accepts an alert, investigates service health and dependencies, decides whether remediation is needed, and records its actions in MLflow traces. All actions are intentionally limited to a small allowlist of tools so the system can be evaluated safely without touching real production systems.
+
+## What this project does
+
+- Exposes a FastAPI endpoint for agent evaluation: `POST /agent/invoke`
+- Creates a fresh simulated environment for each request
+- Verifies service health, database health, and logs
+- Performs a simulated restart when needed
+- Validates the service after remediation
+- Escalates a simulated incident if recovery fails
+- Records trace metadata in MLflow
+- Supports Promptfoo-based testing against the running API
 
 ## Architecture
 
-`POST /agent/invoke` creates a fresh `SimulatedEnvironment`, an `AuthorizedToolRegistry`, and a typed `SelfHealingAgent`. The agent identifies the service, checks the database, service, and logs, decides whether remediation is needed, simulates a restart, validates the service, and escalates through a simulated incident when recovery fails.
+The app is intentionally simple and observable:
 
-All state is explicit in `AgentState`. The registry is an allowlist of exactly six tools. The tools never access a host, process, database, container, Kubernetes cluster, or production system. The default LLM provider is deterministic; OpenAI is an optional provider behind the same protocol.
+- `app/main.py` exposes the FastAPI service
+- `app/agent/agent.py` contains the `SelfHealingAgent`
+- `app/tools/*` defines the allowed tools and simulation behavior
+- `app/tracing/mlflow_config.py` configures MLflow tracing
+- `promptfooconfig.yaml` defines end-to-end evaluation cases against the API
+- `tests/` contains project-level validation and regression checks
 
-## Install
+## Tech stack
 
-```powershell
+- Python
+- FastAPI
+- Pydantic
+- MLflow
+- Promptfoo
+- Pytest
+
+## Prerequisites
+
+- Python 3.10+
+- A local MLflow server
+- Optional: Groq/OpenAI credentials if you want to use a real LLM provider
+
+## Setup
+
+```bash
 cd ai-qe-self-healing-agent
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate   # Linux/macOS
+# or .\.venv\Scripts\Activate.ps1   # Windows PowerShell
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` and change values as needed. `.env` is ignored by git.
+Copy the sample environment file and adjust values if needed:
 
-## Environment variables
+```bash
+cp .env.example .env
+```
 
-`MLFLOW_TRACKING_URI` defaults to `http://localhost:5000`. `MLFLOW_EXPERIMENT_NAME` selects the MLflow experiment. `LLM_PROVIDER` is `deterministic` by default or `openai`; the latter requires `OPENAI_API_KEY` and optionally `OPENAI_MODEL`.
+The project reads configuration from environment variables such as:
 
-The deterministic state is controlled by `SIM_DATABASE_HEALTHY`, `SIM_SERVICE_HEALTHY`, `SIM_LOGS_NORMAL`, `SIM_RESTART_SUCCEEDS`, and `SIM_VALIDATION_HEALTHY`. Set them to `true` or `false` before starting the app. A new environment is created for every invocation, so scenarios are isolated and repeatable.
+- `MLFLOW_TRACKING_URI`
+- `MLFLOW_EXPERIMENT_NAME`
+- `LLM_PROVIDER`
+- `GROQ_API_KEY`
+- `SIM_DATABASE_HEALTHY`
+- `SIM_SERVICE_HEALTHY`
+- `SIM_LOGS_NORMAL`
+- `SIM_RESTART_SUCCEEDS`
+- `SIM_VALIDATION_HEALTHY`
 
-## Start MLflow locally
+## Start MLflow
 
-With MLflow installed, run:
-
-```powershell
+```bash
 mlflow server --host 0.0.0.0 --port 5000
 ```
 
-For a local file-backed development setup without a server, set `MLFLOW_TRACKING_URI=mlruns`; the example configuration uses the local server instead.
+Then set the environment variable if needed:
+
+```bash
+export MLFLOW_TRACKING_URI=http://localhost:5000
+```
 
 ## Start the API
 
-```powershell
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-## Example requests
+## Health check
 
-```powershell
+```bash
 curl http://localhost:8000/health
 ```
 
-```powershell
-curl -X POST http://localhost:8000/agent/invoke `
-  -H "Content-Type: application/json" `
-  -d '{"alert":"Order service is unavailable","environment":"test"}'
+Example response:
+
+```json
+{"status": "ok", "service": "ai-qe-self-healing-agent"}
 ```
 
-A healthy scenario returns `no_action`. An unhealthy service with a successful simulated restart returns `resolved`; failed validation or an unhealthy database returns `escalated` with a deterministic simulated incident ID.
+## Example agent request
+
+```bash
+curl -X POST http://localhost:8000/agent/invoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alert": "The payment service is unhealthy.",
+    "environment": "test",
+    "correlation_id": "demo-001"
+  }'
+```
+
+Example response shape:
+
+```json
+{
+  "status": "no_action",
+  "message": "No remediation required; service and dependencies are healthy.",
+  "incident_id": null,
+  "service": "payment service",
+  "remediation_performed": false
+}
+```
+
+Status values include:
+
+- `no_action`
+- `resolved`
+- `escalated`
+
+## Promptfoo evaluation
+
+This project includes a Promptfoo configuration at `promptfooconfig.yaml` that calls the live FastAPI endpoint and validates assertions against the returned JSON.
+
+To run Promptfoo:
+
+```bash
+npx promptfoo eval
+```
+
+The configuration includes:
+
+- deterministic JavaScript assertions against API output
+- a malicious prompt-injection regression case
+- a rubric-based LLM judge using Groq/OpenAI-compatible models
 
 ## MLflow traces
 
-The root `self_healing_agent` function is decorated with the current `@mlflow.trace` API. Nested traced functions record the LLM call and every authorized tool call, including their inputs and outputs. The root trace is tagged with status and service and stores the explicit state events as metadata. Open the configured experiment in the MLflow UI after invoking the API.
+The root agent invocation is traced with MLflow. Each request records investigation steps, tool calls, and final state transitions, making it easy to inspect the decision path in the MLflow UI.
 
-## Limitations and assumptions
+## Safety model
 
-The service name extractor intentionally supports simple alert phrasing and defaults to `order service`. Environment values are loaded at process startup, so restart the API after changing `.env`. The deterministic provider does not make a network call; the optional OpenAI provider is only used when explicitly selected. This project intentionally has no automated test suite yet.
+This project intentionally simulates all system actions and never interacts with real infrastructure. The tool registry is allowlisted and only supports safe simulated tools such as:
+
+- checking service health
+- checking database health
+- checking logs
+- restarting a simulated service
+- validating service health
+- creating a simulated incident
+
+## Project structure
+
+```text
+ai-qe-self-healing-agent/
+├── app/
+│   ├── agent/
+│   ├── config/
+│   ├── models/
+│   ├── tools/
+│   ├── tracing/
+│   └── main.py
+├── evaluation/
+├── prompts/
+├── tests/
+├── .env.example
+├── promptfooconfig.yaml
+├── pyproject.toml
+├── requirements.txt
+├── README.md
+└── Dockerfile
+```
+
+## Notes
+
+- The service name extraction is intentionally simple and may default to `order service` for generic alerts.
+- New simulated scenarios are isolated by creating a fresh environment for each API invocation.
+- The deterministic provider is the default path; a real LLM provider is only used when configured explicitly.
