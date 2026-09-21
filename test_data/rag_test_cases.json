@@ -1,0 +1,33 @@
+[
+  {
+    "id": "rag_restart_prerequisite",
+    "question": "What should I verify before restarting the payment service?",
+    "expected_evidence": [
+      "database connectivity"
+    ],
+    "expected_behavior": "The answer should state that database connectivity must be verified before restarting the service."
+  },
+  {
+    "id": "rag_post_restart_validation",
+    "question": "What should I do after restarting an unhealthy service?",
+    "expected_evidence": [
+      "validate",
+      "health"
+    ],
+    "expected_behavior": "The answer should state that service health must be validated after the restart."
+  },
+  {
+    "id": "rag_failed_remediation",
+    "question": "What should happen if remediation fails to restore service health?",
+    "expected_evidence": [
+      "incident"
+    ],
+    "expected_behavior": "The answer should state that an incident should be created when authorized remediation fails to restore health."
+  },
+  {
+    "id": "rag_missing_retry_information",
+    "question": "What is the maximum number of retries allowed when restarting the payment service?",
+    "expected_evidence": [],
+    "expected_behavior": "The system should explicitly state that the retrieved context does not contain this information."
+  }
+]
